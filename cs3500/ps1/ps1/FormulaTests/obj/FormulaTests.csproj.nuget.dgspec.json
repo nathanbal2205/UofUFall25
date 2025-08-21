@@ -1,0 +1,93 @@
+{
+  "format": 1,
+  "restore": {
+    "/home/nathanbal/Documents/UofU/UofUFall25/cs3500/ps1/ps1/FormulaTests/FormulaTests.csproj": {}
+  },
+  "projects": {
+    "/home/nathanbal/Documents/UofU/UofUFall25/cs3500/ps1/ps1/FormulaTests/FormulaTests.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/home/nathanbal/Documents/UofU/UofUFall25/cs3500/ps1/ps1/FormulaTests/FormulaTests.csproj",
+        "projectName": "FormulaTests",
+        "projectPath": "/home/nathanbal/Documents/UofU/UofUFall25/cs3500/ps1/ps1/FormulaTests/FormulaTests.csproj",
+        "packagesPath": "/home/nathanbal/.nuget/packages/",
+        "outputPath": "/home/nathanbal/Documents/UofU/UofUFall25/cs3500/ps1/ps1/FormulaTests/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/nathanbal/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net9.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net9.0": {
+            "targetAlias": "net9.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "9.0.200"
+      },
+      "frameworks": {
+        "net9.0": {
+          "targetAlias": "net9.0",
+          "dependencies": {
+            "MSTest.TestAdapter": {
+              "target": "Package",
+              "version": "[3.10.2, )"
+            },
+            "MSTest.TestFramework": {
+              "target": "Package",
+              "version": "[3.10.2, )"
+            },
+            "Microsoft.NET.Test.Sdk": {
+              "target": "Package",
+              "version": "[17.10.0, )"
+            },
+            "StyleCop.Analyzers": {
+              "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.1.118, )"
+            },
+            "coverlet.collector": {
+              "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[6.0.2, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/9.0.203/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}
