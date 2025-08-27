@@ -74,28 +74,103 @@ public class FormulaSyntaxTests
 
     // --- Tests for Valid Token Rule ---
 
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a the accepted tokens are all valid in the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    public void FormulaConstructor_TestTokens_Valid()
+    {
+        _ = new Formula("(1 + 1) - (4 * 3) / 8");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that "a" is an invalid tokens in the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_TestaVariables_Invalid()
+    {
+        _ = new Formula("a");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that "1" is an invalid tokens in the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_Test1Variables_Invalid()
+    {
+        _ = new Formula("1");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that "1a" is an invalid tokens in the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_Test1aVariables_Invalid()
+    {
+        _ = new Formula("1a");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that "a1a" is an invalid tokens in the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_Testa1aVariables_Invalid()
+    {
+        _ = new Formula("a1a");
+    }
+
     // --- Tests for Closing Parenthesis Rule
-    
+
     /// <summary>
     ///   <para>
     ///     This test verifies that a formula with valid parentheses is accepted by the constructor.
     ///   </para>
     /// </summary>
-    /// <remarks>
-    ///   The formula "(1 + 1)" is valid and should not cause any exceptions.
-    /// </remarks>
-    /// <example>
-    ///   <code>
-    ///      _ = new Formula("(1 + 1)");
-    ///   </code>
-    /// </example>
     [TestMethod]
     public void FormulaConstructor_TestParentheses_Valid()
     {
         _ = new Formula("(1 + 1)");
     }
 
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula with to many closing parentheses is rejected by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_TestMultipleParentheses_Invalid()
+    {
+        _ = new Formula("(1)) + 1)");
+    }
+
     // --- Tests for Balanced Parentheses Rule
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula with more open parentheses than closed is rejected by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_TestUnbalancedParentheses_Invalid()
+    {
+        _ = new Formula("((1 + 1)");
+    }
 
     // --- Tests for First Token Rule
 
@@ -115,7 +190,123 @@ public class FormulaSyntaxTests
         _ = new Formula( "1+1" );
     }
 
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula starting with a variable is accepted by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    public void FormulaConstructor_TestFirstTokenVariable_Valid()
+    {
+        _ = new Formula("abc123 + 3");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula starting with a open parenthesis is accepted by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    public void FormulaConstructor_TestFirstTokenOpenParenthesis_Valid()
+    {
+        _ = new Formula("(abc123) + 3");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula starting with a closed parenthesis symbol is rejected by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_TestFirstTokenClosedParenthesis_Invalid()
+    {
+        _ = new Formula(") 4 + 3");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula starting with a plus symbol is rejected by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_TestFirstTokenPlus_Invalid()
+    {
+        _ = new Formula("+ 4 + 3");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula starting with a divide symbol is rejected by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_TestFirstTokenDivide_Invalid()
+    {
+        _ = new Formula("/ 4 + 3");
+    }
+
     // --- Tests for  Last Token Rule ---
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula ending with a variable is accepted by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    public void FormulaConstructor_TestLastTokenVariable_Valid()
+    {
+        _ = new Formula("3 + abc123");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula ending with a closed parenthesis is accepted by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    public void FormulaConstructor_TestLastTokenClosedParenthesis_Valid()
+    {
+        _ = new Formula("(abc123 + 3)");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula ending with a open parenthesis symbol is rejected by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_TestLastTokenOpenParenthesis_Invalid()
+    {
+        _ = new Formula("(4 + 3(");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula ending with a plus symbol is rejected by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_TestLastTokenPlus_Invalid()
+    {
+        _ = new Formula("4 + 3 +");
+    }
+
+    /// <summary>
+    ///   <para>
+    ///     This test verifies that a formula ending with a divide symbol is rejected by the constructor.
+    ///   </para>
+    /// </summary>
+    [TestMethod]
+    [ExpectedException( typeof( FormulaFormatException ) )]
+    public void FormulaConstructor_TestLastTokenDivide_Invalid()
+    {
+        _ = new Formula("4 + 3 /");
+    }
 
     // --- Tests for Parentheses/Operator Following Rule ---
 
