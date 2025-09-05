@@ -1,5 +1,5 @@
 # Auther: Nathan Bal
-# Acutal Value: 19.03595°C
+# Analytical Value: 19.03595°C
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -111,6 +111,7 @@ def plot_results(algorithm, T_initial, T_surround, r, t_final, h_list):
     plt.title(f'Cooling of Coffee Cup: {algorithm} Method')
     plt.legend()
     plt.grid(True)
+    plt.savefig(f"{algorithm}_plot.png", dpi=300)
     plt.show()
 
 
