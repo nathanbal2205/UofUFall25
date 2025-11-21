@@ -110,11 +110,12 @@ static void check_and_unmap_full_pages() {
 static header_t *get_prev_block(header_t *h) {
     footer_t *prev_f = (footer_t *)((char*)h - FDRSIZE);
 
+    // Don't dereference prev_f until we've validated it
     printf("[DEBUG] get_prev_block: h=%p, prev_f=%p\n",
            h, prev_f);
 
     if (!footer_is_valid(prev_f)) {
-        printf("[DEBUG] prev_f magic invalid: %x\n\n", prev_f->magic);
+        printf("[DEBUG] prev_f invalid or magic mismatch\n\n");
         return NULL;
     }
 
@@ -126,10 +127,11 @@ static header_t *get_prev_block(header_t *h) {
 }
 
 static header_t *get_next_block(header_t *h) {
-    footer_t *f = (footer_t *)((char *)h + h->size - sizeof(footer_t));
+    // Use aligned footer size (FDRSIZE) consistently when locating footers
+    footer_t *f = (footer_t *)((char *)h + h->size - FDRSIZE);
 
     // verify footer exists
-    if (f->magic != FOOTER_MAGIC) return NULL;
+    if (!footer_is_valid(f)) return NULL;
 
     header_t *next_h = (header_t *)((char *)h + h->size);
 
@@ -336,8 +338,8 @@ void *mm_malloc(size_t size) {
 }
 
 void mm_free(void *ptr) {
-    printf("[DEBUG] mm_free called with %p\n", ptr - HDRSIZE);
     if (!ptr) return;
+    printf("[DEBUG] mm_free called with %p\n", (char *)ptr - HDRSIZE);
     header_t *h = (header_t *)((char *)ptr - HDRSIZE);
     SET_FREE(h);
     coalesce(ptr);
