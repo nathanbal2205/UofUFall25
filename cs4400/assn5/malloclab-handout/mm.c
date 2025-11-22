@@ -14,25 +14,26 @@
 #define ALIGN(sz) (((sz) + (ALIGNMENT-1)) & ~(ALIGNMENT-1))
 #define HDRSIZE ALIGN(sizeof(header_t))   // header aligned to 16 bytes
 #define FDRSIZE ALIGN(sizeof(footer_t))   // footer aligned to 16 bytes
-#define MIN_BLOCK_SIZE 64                 // minimum block size for free block header and prev/next pointer
+#define MIN_BLOCK_SIZE 32                 // minimum block size for free block header and prev/next pointer
 
 /* ---------------- Block Header ---------------- */
 
 typedef struct header {
     size_t size;       // total size of the block including header
     int allocated;     // 0 = free, 1 = allocated
-    int page_size;
+    int padding;
 } header_t;
 
 typedef struct footer {
-    int size;       // block size (header + payload + footer)
-    uint32_t magic;      // FOOTER_MAGIC
-    void *page_end;      // pointer to end of mapped page
+    size_t size;       // block size (header + payload + footer)
+    size_t padding;
 } footer_t;
 
 typedef struct page_chunk {
     struct page_chunk *prev_chunk;
     struct page_chunk *next_chunk;
+    size_t page_size;
+    void *page_end;
 } page_chunk_t;
 
 static page_chunk_t *page_list_head = NULL;
@@ -60,16 +61,9 @@ static void coalesce(void *bp);
 static void split_block(header_t *h, size_t asize);
 
 
-static inline void write_footer(header_t *h, void *page_end) {
+static inline void write_footer(header_t *h) {
     footer_t *f = (footer_t *)((char *)h + BLOCK_SIZE(h) - FDRSIZE);
     f->size = BLOCK_SIZE(h);
-    f->magic = FOOTER_MAGIC;
-    f->page_end = page_end;
-}
-
-/* validate footer structure in mapped region */
-static inline int footer_is_valid(footer_t *f) {
-    return f && f->magic == FOOTER_MAGIC;
 }
 
 static void check_and_unmap_full_pages() {
@@ -79,7 +73,7 @@ static void check_and_unmap_full_pages() {
         // The first block after page header
         page_chunk_t *next = pc->next_chunk;
         header_t *h = (header_t *)((char *)pc + sizeof(page_chunk_t));
-        int page_size = h->page_size;
+        size_t page_size = pc->page_size;
 
         // Only unmap if the block is free and fills the remaining page
         size_t remaining_size = page_size - sizeof(page_chunk_t);
@@ -106,51 +100,90 @@ static void check_and_unmap_full_pages() {
     }
 }
 
+static page_chunk_t *find_page_chunk_for_addr(void *addr) {
+    page_chunk_t *pc = page_list_head;
+    while (pc) {
+        void *page_start = (char *)pc + sizeof(page_chunk_t);
+        void *page_end = pc->page_end;
+        if (addr > page_start && addr < page_end) return pc;
+        pc = pc->next_chunk;
+    }
+    return NULL;
+}
+
 /* Return the previous block's header if one exists and is valid.
-   Otherwise return NULL.
-*/
+   Otherwise return NULL.  This version uses page_chunk bounds checks
+   (via find_page_chunk_for_addr) and does not dereference footers that
+   lie outside the containing mapped page. */
 static header_t *get_prev_block(header_t *h) {
-    footer_t *prev_f = (footer_t *)((char*)h - FDRSIZE);
+    /* Find the page chunk containing this header */
+    page_chunk_t *pc = find_page_chunk_for_addr((void *)h);
+    if (!pc) return NULL;
 
-    // Don't dereference prev_f until we've validated it
-    // printf("[DEBUG] get_prev_block: h=%p, prev_f=%p\n",
-    //        h, prev_f);
+    void *page_start = (char *)pc + sizeof(page_chunk_t);
+    void *page_end = pc->page_end;
 
-    if (!footer_is_valid(prev_f)) {
-        // printf("[DEBUG] prev_f invalid or magic mismatch\n\n");
+    /* location of the previous footer (use aligned footer size) */
+    footer_t *prev_f = (footer_t *)((char *)h - FDRSIZE);
+
+    /* Ensure the footer pointer lies within the mapped page region */
+    if ((void *)prev_f < page_start || (void *)prev_f + sizeof(footer_t) > page_end) {
+        /* previous footer would be outside this page -> no prev block in this page */
         return NULL;
     }
 
+    /* now safe to read prev_f->size */
     size_t prev_size = prev_f->size;
-    header_t *prev_h = (header_t *)((char*)h - prev_size);
-    // printf("[DEBUG] prev_h candidate: %p\n\n", prev_h);
+
+    /* Basic sanity checks on prev_size */
+    if (prev_size < (HDRSIZE + FDRSIZE) || prev_size > (size_t)(page_end - page_start)) {
+        return NULL;
+    }
+
+    header_t *prev_h = (header_t *)((char *)h - prev_size);
+
+    /* Ensure prev_h lies inside this page */
+    if ((void *)prev_h < page_start || (void *)prev_h + sizeof(header_t) > page_end) {
+        return NULL;
+    }
 
     return prev_h;
 }
 
+/* Return the next block's header if one exists and is valid.
+   Uses page_chunk bounds checks to avoid reading footers outside mapped pages. */
 static header_t *get_next_block(header_t *h) {
-    // Use aligned footer size (FDRSIZE) consistently when locating footers
+    /* Find the page chunk containing this header */
+    page_chunk_t *pc = find_page_chunk_for_addr((void *)h);
+    if (!pc) return NULL;
+
+    void *page_start = (char *)pc + sizeof(page_chunk_t);
+    void *page_end = pc->page_end;
+
+    /* Compute footer position for this block (aligned FDRSIZE) */
     footer_t *f = (footer_t *)((char *)h + h->size - FDRSIZE);
 
-    // verify footer exists
-    if (!footer_is_valid(f)) return NULL;
-
-    header_t *next_h = (header_t *)((char *)h + h->size);
-
-    // printf("[DEBUG] get_next_block: h=%p, next_h=%p\n", h, next_h);
-
-    // DO NOT WALK PAST PAGE
-    if ((void*)next_h >= f->page_end) {
-        // printf("[DEBUG] next_h invalid\n");
+    /* Ensure the footer lies inside the page so it's safe to read its contents */
+    if ((void *)f < page_start || (void *)f + sizeof(footer_t) > page_end) {
         return NULL;
     }
 
-    // printf("[DEBUG] next_h candidate: %p\n\n", next_h);
+    /* compute the candidate next header */
+    header_t *next_h = (header_t *)((char *)h + h->size);
+
+    /* Ensure next_h does not walk past the page end */
+    if ((void *)next_h >= page_end) {
+        return NULL;
+    }
+
+    /* Optionally, do a lightweight sanity check: next_h must be at least HDRSIZE away
+       from page_start and its header structure should fit in page bounds. */
+    if ((void *)next_h < page_start || (void *)next_h + sizeof(header_t) > page_end) {
+        return NULL;
+    }
 
     return next_h;
 }
-
-
 
 /* ---------------- Helper: Insert into free list ---------------- */
 static void insert_free_block(void *bp) {
@@ -194,19 +227,18 @@ static void split_block(header_t *h, size_t asize) {
     size_t block_size = BLOCK_SIZE(h);                 // total size of the block
     size_t alloc_size = HDRSIZE + asize + FDRSIZE;     // allocated block includes header + payload + footer
     size_t remaining = block_size - alloc_size;
-    footer_t *f = (footer_t *)((char*)h + BLOCK_SIZE(h) - FDRSIZE);
 
     if (remaining >= HDRSIZE + MIN_BLOCK_SIZE + FDRSIZE) {
         // Shrink the current block to allocated size
         h->size = alloc_size;
         SET_ALLOC(h);
-        write_footer(h, f->page_end);
+        write_footer(h);
 
         // Create a new free block with remaining space
         header_t *next_h = (header_t *)((char *)h + alloc_size);
         next_h->size = remaining;
         SET_FREE(next_h);
-        write_footer(next_h, f->page_end);
+        write_footer(next_h);
 
         // printf("[DEBUG] split_block: new free block created at %p | block size=%zu | payload=%zu\n",
         //        next_h,
@@ -226,7 +258,6 @@ static void split_block(header_t *h, size_t asize) {
 /* ---------------- Helper: Coalesce adjacent free blocks ---------------- */
 static void coalesce(void *bp) {
     header_t *h = (header_t *)((char *)bp - HDRSIZE);
-    footer_t *f = (footer_t *)((char *)h + BLOCK_SIZE(h) - FDRSIZE);
 
     header_t *prev_h = get_prev_block(h);
     header_t *next_h = get_next_block(h);
@@ -248,7 +279,7 @@ static void coalesce(void *bp) {
         remove_free_block((char *)next_h + HDRSIZE);
         h->size += BLOCK_SIZE(next_h);
     }
-    write_footer(h, f->page_end);
+    write_footer(h);
 
     insert_free_block((char *)h + HDRSIZE);
 
@@ -307,6 +338,7 @@ void *mm_malloc(size_t size) {
     page_chunk_t *pc = (page_chunk_t *)region;
     pc->prev_chunk = NULL;
     pc->next_chunk = page_list_head;
+    pc->page_size = mapsize;
     if (page_list_head)
         page_list_head->prev_chunk = pc;
     page_list_head = pc;
@@ -318,8 +350,7 @@ void *mm_malloc(size_t size) {
     header_t *h = (header_t *)((char *)region + sizeof(page_chunk_t));
     h->size = total_size;
     h->allocated = 1;
-    h->page_size = mapsize;
-    write_footer(h, (char*)region + mapsize);  // set page_end
+    write_footer(h);  // set page_end
 
     // If leftover space in the page, create a free block
     size_t remaining = mapsize - sizeof(page_chunk_t) - total_size;
@@ -328,7 +359,7 @@ void *mm_malloc(size_t size) {
         header_t *free_h = (header_t *)((char *)h + total_size); // <-- no 'header_t *' here
         free_h->size = remaining;
         SET_FREE(free_h);
-        write_footer(free_h, (char*)region + mapsize);
+        write_footer(free_h);
         insert_free_block((char *)free_h + HDRSIZE);
 
         // printf("[DEBUG] mm_malloc: | page chunk header %p | allocated block header %p size: %lu | free block %p size: %lu |\n\n",
