@@ -75,6 +75,7 @@ static void check_and_unmap_full_pages() {
     page_chunk_t *pc = page_list_head;
 
     while (pc) {
+        printf("unmap_full_pages: WHERE IS THE PROBLEM!!!\n");
         // The first block after page header
         page_chunk_t *next = pc->next_chunk;
         header_t *h = (header_t *)((char *)pc + sizeof(page_chunk_t));
@@ -99,7 +100,7 @@ static void check_and_unmap_full_pages() {
 
             mem_unmap(pc, pc->size);
         }
-        
+
         pc = next;
     }
 }
@@ -177,6 +178,7 @@ static void remove_free_block(void *bp) {
 static void *find_fit(size_t asize) {
     void *bp = free_list_head;
     while (bp) {
+        printf("find_fit: WHERE IS THE PROBLEM!!!\n");
         header_t *h = (header_t *)((char *)bp - HDRSIZE); // get the header
         size_t total_size = HDRSIZE + asize + FDRSIZE;    // total block size needed
         if (!GET_ALLOC(h) && h->size >= total_size) {
@@ -255,8 +257,6 @@ static void coalesce(void *bp) {
 
     /* ---- Check if entire page is free ---- */
     check_and_unmap_full_pages();
-
-    printf("WHERE IS THE PROBLEM!!!\n");
 }
 
 /* ------------------ mm.c API ------------------ */
