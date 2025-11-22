@@ -259,6 +259,7 @@ static void coalesce(void *bp) {
 
 /* ------------------ mm.c API ------------------ */
 int mm_init(void) {
+    printf("==== mm_init has been CALLED! The it BEGIN!!!!!!!! ====\n\n");
     free_list_head = NULL;
     page_list_head = NULL;
     return 0;
