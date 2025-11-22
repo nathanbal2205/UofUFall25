@@ -5,6 +5,8 @@
 #include <assert.h>
 #include <string.h>
 
+#include <execinfo.h>
+
 #include "mm.h"
 #include "memlib.h"
 
@@ -14,7 +16,7 @@
 #define ALIGN(sz) (((sz) + (ALIGNMENT-1)) & ~(ALIGNMENT-1))
 #define HDRSIZE ALIGN(sizeof(header_t))   // header aligned to 16 bytes
 #define FDRSIZE ALIGN(sizeof(footer_t))   // footer aligned to 16 bytes
-#define MIN_BLOCK_SIZE 32                 // minimum block size for free block header and prev/next pointer
+#define MIN_BLOCK_SIZE 16                 // minimum block size for free block header and prev/next pointer
 
 /* ---------------- Block Header ---------------- */
 
@@ -59,12 +61,37 @@ static void remove_free_block(void *bp);
 static void *find_fit(size_t asize);
 static void coalesce(void *bp);
 static void split_block(header_t *h, size_t asize);
+static header_t *get_prev_block(header_t *h);
+static header_t *get_next_block(header_t *h);
 
 
-static inline void write_footer(header_t *h) {
-    footer_t *f = (footer_t *)((char *)h + BLOCK_SIZE(h) - FDRSIZE);
-    f->size = BLOCK_SIZE(h);
+
+static void dump_page_list(void) {
+    page_chunk_t *pc = page_list_head;
+    fprintf(stderr, "DUMP page_list:\n");
+    int i = 0;
+    while (pc) {
+        fprintf(stderr, "  [%02d] pc=%p prev=%p next=%p page_size=%zu page_end=%p\n",
+                i++, pc, pc->prev_chunk, pc->next_chunk, pc->page_size, pc->page_end);
+        pc = pc->next_chunk;
+    }
 }
+static void dump_free_list(void) {
+    void *bp = free_list_head;
+    fprintf(stderr, "DUMP free_list:\n");
+    int i = 0;
+    while (bp) {
+        void *prev = FREE_PREV_PTR(bp);
+        void *next = FREE_NEXT_PTR(bp);
+        header_t *h = (header_t *)((char *)bp - HDRSIZE);
+        fprintf(stderr, "  [%02d] bp=%p header=%p size=%zu alloc=%d prev=%p next=%p\n",
+                i++, bp, h, (size_t)h->size, h->allocated, prev, next);
+        bp = next;
+        if (i > 200) { fprintf(stderr, "  ... free_list too long, stopping dump\n"); break; }
+    }
+}
+
+
 
 static void check_and_unmap_full_pages() {
     page_chunk_t *pc = page_list_head;
@@ -105,10 +132,89 @@ static page_chunk_t *find_page_chunk_for_addr(void *addr) {
     while (pc) {
         void *page_start = (char *)pc + sizeof(page_chunk_t);
         void *page_end = pc->page_end;
-        if (addr > page_start && addr < page_end) return pc;
+        if (addr >= page_start && addr < page_end) return pc;
         pc = pc->next_chunk;
     }
     return NULL;
+}
+
+static inline void write_footer(header_t *h) {
+    footer_t *f = (footer_t *)((char *)h + BLOCK_SIZE(h) - FDRSIZE);
+
+    /* optional sanity check: ensure f lies inside a mapped page */
+    page_chunk_t *pc = find_page_chunk_for_addr((void *)h);
+    if (pc) {
+        void *page_start = (char *)pc + sizeof(page_chunk_t);
+        void *page_end = pc->page_end;
+        if ((void *)f < page_start || (void *)f + sizeof(footer_t) > page_end) {
+            fprintf(stderr, "[ERROR] write_footer would write outside page: f=%p page_start=%p page_end=%p\n",
+                    (void*)f, page_start, page_end);
+            abort();
+        }
+    }
+
+    f->size = BLOCK_SIZE(h);
+}
+static inline void write_footer_debug(header_t *h) {
+    footer_t *f = (footer_t *)((char *)h + BLOCK_SIZE(h) - FDRSIZE);
+
+    /* Find page chunk that contains header h */
+    page_chunk_t *pc;
+    // fprintf(stderr, "[DEBUG] write_footer: header=%p BLOCK_SIZE=%zu\n", (void*)h, (size_t)BLOCK_SIZE(h));
+
+    /* iterate known pages and print ranges (use char* for comparisons) */
+    for (pc = page_list_head; pc != NULL; pc = pc->next_chunk) {
+        char *page_start = (char *)pc;
+        char *page_payload_start = (char *)pc + sizeof(page_chunk_t);
+        char *page_end = (char *)pc->page_end;
+    }
+
+    /* then print a more specific local check to find which page contains h */
+    for (pc = page_list_head; pc != NULL; pc = pc->next_chunk) {
+        char *payload_start = (char *)pc + sizeof(page_chunk_t);
+        char *page_end = (char *)pc->page_end;
+        if ((char *)h >= payload_start && (char *)h < page_end) {
+            // fprintf(stderr, "[DEBUG] header %p is inside page %p (payload_start=%p page_end=%p)\n",
+            //         (void*)h, (void*)pc, (void*)payload_start, (void*)page_end);
+            break;
+        }
+    }
+    if (!pc) {
+        fprintf(stderr, "[ERROR] write_footer: could not find page_chunk for header %p\n", (void*)h);
+        /* dump globals for more context */
+        // dump_page_list();
+        // dump_free_list();
+        abort();
+    }
+
+    char *page_payload_start = (char *)pc + sizeof(page_chunk_t);
+    char *page_end = (char *)pc->page_end;
+
+    /* If footer would be outside page bounds, print diagnostics and abort */
+    if ((char *)f < page_payload_start || ((char *)f + sizeof(footer_t)) > page_end) {
+        fprintf(stderr, "[ERROR] write_footer would write outside page: f=%p page_start=%p page_end=%p\n",
+                (void*)f, (void*)page_payload_start, (void*)page_end);
+        fprintf(stderr, "  header h=%p BLOCK_SIZE(h)=%zu HDRSIZE=%zu FDRSIZE=%zu\n",
+                (void*)h, (size_t)BLOCK_SIZE(h), (size_t)HDRSIZE, (size_t)FDRSIZE);
+        fprintf(stderr, "  page_chunk pc=%p page_size=%zu page_end=%p\n", (void*)pc, pc->page_size, (void*)pc->page_end);
+
+        header_t *prev_h = get_prev_block(h);
+        header_t *next_h = get_next_block(h);
+        fprintf(stderr, "  prev_h=%p next_h=%p\n", (void*)prev_h, (void*)next_h);
+
+        // dump_page_list();
+        // dump_free_list();
+
+        void *bt[32];
+        int n = backtrace(bt, 32);
+        fprintf(stderr, "Backtrace (%d frames):\n", n);
+        backtrace_symbols_fd(bt, n, fileno(stderr));
+
+        abort();
+    }
+
+    /* Normal case: write footer */
+    f->size = BLOCK_SIZE(h);
 }
 
 /* Return the previous block's header if one exists and is valid.
@@ -232,13 +338,13 @@ static void split_block(header_t *h, size_t asize) {
         // Shrink the current block to allocated size
         h->size = alloc_size;
         SET_ALLOC(h);
-        write_footer(h);
+        write_footer_debug(h);
 
         // Create a new free block with remaining space
         header_t *next_h = (header_t *)((char *)h + alloc_size);
         next_h->size = remaining;
         SET_FREE(next_h);
-        write_footer(next_h);
+        write_footer_debug(next_h);
 
         // printf("[DEBUG] split_block: new free block created at %p | block size=%zu | payload=%zu\n",
         //        next_h,
@@ -279,7 +385,7 @@ static void coalesce(void *bp) {
         remove_free_block((char *)next_h + HDRSIZE);
         h->size += BLOCK_SIZE(next_h);
     }
-    write_footer(h);
+    write_footer_debug(h);
 
     insert_free_block((char *)h + HDRSIZE);
 
@@ -326,7 +432,8 @@ void *mm_malloc(size_t size) {
 
     // Need to map a new page
     size_t pagesize = mem_pagesize();
-    size_t mapsize = ((total_size + pagesize - 1) / pagesize) * pagesize;
+    size_t need = total_size + sizeof(page_chunk_t);
+    size_t mapsize = ((need + pagesize - 1) / pagesize) * pagesize;
 
     void *region = mem_map(mapsize);
     if (!region) return NULL;
@@ -339,27 +446,53 @@ void *mm_malloc(size_t size) {
     pc->prev_chunk = NULL;
     pc->next_chunk = page_list_head;
     pc->page_size = mapsize;
+    pc->page_end = (char *)region + mapsize;
     if (page_list_head)
         page_list_head->prev_chunk = pc;
     page_list_head = pc;
+
+    void *payload_start = (char*)region + sizeof(page_chunk_t);
+    void *page_end = (char*)region + mapsize;
+
+    /* Sanity: ensure there's at least room for header/footer/payload for the requested total_size */
+    if ((size_t)(page_end - payload_start) < total_size) {
+        fprintf(stderr, "BUG: usable page bytes %zu < requested total_size %zu\n",
+                (size_t)(page_end - payload_start), total_size);
+        abort();
+    }
 
     // printf("[DEBUG] mm_malloc: page_insert: pc=%p prev=%p next=%p page_end=%p size=%zu\n",
     //        pc, pc->prev_chunk, pc->next_chunk, (void*)pc->page_end, pc->size);
 
     // Place header right after page_chunk
     header_t *h = (header_t *)((char *)region + sizeof(page_chunk_t));
+    if ((char *)h < payload_start || ((char *)h + HDRSIZE) > page_end) {
+        fprintf(stderr, "BUG: initial header out of payload range: h=%p payload_start=%p page_end=%p\n",
+                (void *)h, (void *)payload_start, (void *)page_end);
+        abort();
+    }
     h->size = total_size;
     h->allocated = 1;
-    write_footer(h);  // set page_end
+    write_footer_debug(h);  // set page_end
 
     // If leftover space in the page, create a free block
     size_t remaining = mapsize - sizeof(page_chunk_t) - total_size;
 
     if (remaining >= HDRSIZE + MIN_BLOCK_SIZE + FDRSIZE) {
         header_t *free_h = (header_t *)((char *)h + total_size); // <-- no 'header_t *' here
+        if ((char *)free_h < payload_start || ((char *)free_h + FDRSIZE) > page_end) {
+        fprintf(stderr, "BUG: free_h out of page bounds: free_h=%p free_h+FDRSIZE=%p page_end=%p remaining=%zu\n",
+                (void *)free_h, (void *)((char *)free_h + FDRSIZE), (void *)page_end, remaining);
+        abort();
+    }
+        if ((char*)free_h < payload_start || (char*)free_h + FDRSIZE > page_end) {
+        fprintf(stderr, "BUG: free_h out of page bounds: free_h=%p free_h+FDRSIZE=%p page_end=%p remaining=%zu\n",
+                free_h, (char*)free_h + FDRSIZE, page_end, remaining);
+        abort();
+}
         free_h->size = remaining;
         SET_FREE(free_h);
-        write_footer(free_h);
+        write_footer_debug(free_h);
         insert_free_block((char *)free_h + HDRSIZE);
 
         // printf("[DEBUG] mm_malloc: | page chunk header %p | allocated block header %p size: %lu | free block %p size: %lu |\n\n",
