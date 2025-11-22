@@ -75,7 +75,6 @@ static void check_and_unmap_full_pages() {
     page_chunk_t *pc = page_list_head;
 
     while (pc) {
-        printf("unmap_full_pages: WHERE IS THE PROBLEM!!!\n");
         // The first block after page header
         page_chunk_t *next = pc->next_chunk;
         header_t *h = (header_t *)((char *)pc + sizeof(page_chunk_t));
@@ -178,7 +177,6 @@ static void remove_free_block(void *bp) {
 static void *find_fit(size_t asize) {
     void *bp = free_list_head;
     while (bp) {
-        printf("find_fit: WHERE IS THE PROBLEM!!!\n");
         header_t *h = (header_t *)((char *)bp - HDRSIZE); // get the header
         size_t total_size = HDRSIZE + asize + FDRSIZE;    // total block size needed
         if (!GET_ALLOC(h) && h->size >= total_size) {
@@ -262,6 +260,7 @@ static void coalesce(void *bp) {
 /* ------------------ mm.c API ------------------ */
 int mm_init(void) {
     free_list_head = NULL;
+    page_list_head = NULL;
     return 0;
 }
 
@@ -309,6 +308,9 @@ void *mm_malloc(size_t size) {
     if (page_list_head)
         page_list_head->prev_chunk = pc;
     page_list_head = pc;
+
+    printf("[DEBUG] mm_malloc: page_insert: pc=%p prev=%p next=%p page_end=%p size=%zu\n",
+           pc, pc->prev_chunk, pc->next_chunk, (void*)pc->page_end, pc->size);
 
     // Place header right after page_chunk
     header_t *h = (header_t *)((char *)region + sizeof(page_chunk_t));
