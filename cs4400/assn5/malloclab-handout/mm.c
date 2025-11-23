@@ -133,9 +133,7 @@ static page_chunk_t *find_page_chunk_for_addr(header_t *h) {
         if ((void *)h >= page_start && (void *)h < page_end) return pc;
         pc = pc->next_chunk;
     }
-    fprintf(stderr, "[ERROR] ind_page_chunk_for_addr could not find header h in a page: h=%p size=%lu\n\n",
-                    (void*)h, h->size);
-    // dump_page_list();
+
     return NULL;
 }
 
@@ -148,15 +146,10 @@ static inline void write_footer(header_t *h) {
         void *page_start = (char *)pc + sizeof(page_chunk_t);
         void *page_end = pc->page_end;
         if ((void *)f < page_start || (void *)f + sizeof(footer_t) > page_end) {
-            // fprintf(stderr, "[ERROR] write_footer would write outside page: f=%p page_start=%p page_end=%p\n",
-            //         (void*)f, page_start, page_end);
+            fprintf(stderr, "[ERROR] write_footer would write outside page: f=%p page_start=%p page_end=%p\n",
+                    (void*)f, page_start, page_end);
             abort();
         }
-    }
-    else {
-        fprintf(stderr, "[ERROR] write_footer could not find header h in a page: h=%p size=%lu\n\n",
-                    (void*)h, h->size);
-            abort();
     }
 
     f->size = BLOCK_SIZE(h);
@@ -309,6 +302,13 @@ static void split_block(header_t *h, size_t asize) {
 /* ---------------- Helper: Coalesce adjacent free blocks ---------------- */
 static void coalesce(void *bp) {
     header_t *h = (header_t *)((char *)bp - HDRSIZE);
+
+    page_chunk_t *pc_2 = find_page_chunk_for_addr(h);
+    if(!pc_2) {
+        fprintf(stderr, "[ERROR] coalesce could not find header h in a page: h=%p size=%lu\n\n",
+                    (void*)h, h->size);
+        abort();
+    }
 
     header_t *prev_h = get_prev_block(h);
     header_t *next_h = get_next_block(h);
