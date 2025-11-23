@@ -581,8 +581,8 @@ static int eval_mm_valid(trace_t *trace, int tracenum, range_t **ranges)
 
     /* Interpret each operation in the trace in order */
     for (i = 0;  i < trace->num_ops;  i++) {
-        index = trace->ops[i].index;
-        size = trace->ops[i].size;
+	index = trace->ops[i].index;
+	size = trace->ops[i].size;
 
         switch (trace->ops[i].type) {
 
