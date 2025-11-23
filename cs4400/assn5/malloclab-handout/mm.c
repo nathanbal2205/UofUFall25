@@ -145,7 +145,8 @@ static inline void write_footer(header_t *h) {
     if (pc) {
         void *page_start = (char *)pc + sizeof(page_chunk_t);
         void *page_end = pc->page_end;
-        if ((void *)f < page_start || (void *)f + sizeof(footer_t) > page_end) {
+        /* Use aligned footer size (FDRSIZE) for bounds checks so checks match pointer arithmetic */
+        if ((void *)f < page_start || (void *)((char *)f + FDRSIZE) > page_end) {
             fprintf(stderr, "[ERROR] write_footer would write outside page: f=%p page_start=%p page_end=%p\n",
                     (void*)f, page_start, page_end);
             abort();
@@ -171,7 +172,7 @@ static header_t *get_prev_block(header_t *h) {
     footer_t *prev_f = (footer_t *)((char *)h - FDRSIZE);
 
     /* Ensure the footer pointer lies within the mapped page region */
-    if ((void *)prev_f < page_start || (void *)prev_f + sizeof(footer_t) > page_end) {
+    if ((void *)prev_f < page_start || (void *)((char *)prev_f + FDRSIZE) > page_end) {
         /* previous footer would be outside this page -> no prev block in this page */
         return NULL;
     }
@@ -187,7 +188,7 @@ static header_t *get_prev_block(header_t *h) {
     header_t *prev_h = (header_t *)((char *)h - prev_size);
 
     /* Ensure prev_h lies inside this page */
-    if ((void *)prev_h < page_start || (void *)prev_h + sizeof(header_t) > page_end) {
+    if ((void *)prev_h < page_start || (void *)((char *)prev_h + sizeof(header_t)) > page_end) {
         return NULL;
     }
 
@@ -208,7 +209,7 @@ static header_t *get_next_block(header_t *h) {
     footer_t *f = (footer_t *)((char *)h + h->size - FDRSIZE);
 
     /* Ensure the footer lies inside the page so it's safe to read its contents */
-    if ((void *)f < page_start || (void *)f + sizeof(footer_t) > page_end) {
+    if ((void *)f < page_start || (void *)((char *)f + FDRSIZE) > page_end) {
         return NULL;
     }
 
@@ -222,7 +223,7 @@ static header_t *get_next_block(header_t *h) {
 
     /* Optionally, do a lightweight sanity check: next_h must be at least HDRSIZE away
        from page_start and its header structure should fit in page bounds. */
-    if ((void *)next_h < page_start || (void *)next_h + sizeof(header_t) > page_end) {
+    if ((void *)next_h < page_start || (void *)((char *)next_h + sizeof(header_t)) > page_end) {
         return NULL;
     }
 
@@ -272,6 +273,8 @@ static void split_block(header_t *h, size_t asize) {
     size_t alloc_size = HDRSIZE + asize + FDRSIZE;     // allocated block includes header + payload + footer
     size_t remaining = block_size - alloc_size;
 
+    /* We require space for a properly aligned header + payload(min) + footer in the remaining chunk.
+       Use HDRSIZE/FDRSIZE (aligned) in the check so we know any created free header/footer fit. */
     if (remaining >= HDRSIZE + MIN_BLOCK_SIZE + FDRSIZE) {
         // Shrink the current block to allocated size
         h->size = alloc_size;
@@ -284,18 +287,12 @@ static void split_block(header_t *h, size_t asize) {
         SET_FREE(next_h);
         write_footer(next_h);
 
-        // printf("[DEBUG] split_block: new free block created at %p | block size=%zu | payload=%zu\n",
-        //        next_h,
-        //        BLOCK_SIZE(next_h),
-        //        PAYLOAD_SIZE(next_h));
-
-        // printf("[DEBUG] split_block: | allocated block header %p size: %lu | free block %p size: %lu |\n\n",
-        //     h, h->size, next_h, next_h->size);
-
         insert_free_block((char *)next_h + HDRSIZE);
     } else {
         // Not enough space to split; allocate the whole block
         SET_ALLOC(h);
+        /* ensure footer reflects final size */
+        write_footer(h);
     }
 }
 
@@ -317,7 +314,7 @@ static void coalesce(void *bp) {
     int next_free = (next_h && !GET_ALLOC(next_h));
 
     printf("[DEBUG] Coalesce: GET_ALLOC prev_free: %d next_free: %d\n",
-        (prev_h && !GET_ALLOC(prev_h)), (next_h && !GET_ALLOC(next_h)));
+        (prev_free), (next_free));
 
     /* ---- Perform merges ---- */
     if (prev_free) {
@@ -333,9 +330,6 @@ static void coalesce(void *bp) {
     write_footer(h);
 
     insert_free_block((char *)h + HDRSIZE);
-
-    // printf("[DEBUG] Coalesce: Final coalesced block: %p | payload=%zu | size=%zu\n",
-    //     (char *)h, PAYLOAD_SIZE(h), BLOCK_SIZE(h));
 
     /* ---- Check if entire page is free ---- */
     check_and_unmap_full_pages();
@@ -363,16 +357,16 @@ void *mm_malloc(size_t size) {
         remove_free_block(bp);                // remove from free list
 
         printf("[DEBUG] mm_malloc: Found Space at %p, block size=%zu for SIZE=%lu\n\n",
-           bp - HDRSIZE, BLOCK_SIZE(h), size);
+           (void *)((char *)bp - HDRSIZE), BLOCK_SIZE(h), size);
 
-        // Split the block if large enough to remain free
-        if (h->size >= total_size + MIN_BLOCK_SIZE) {
-            split_block(h, asize);           // split off remaining free block
-        }
+        /* Let split_block decide whether to split. It will set allocated/footer correctly. */
+        split_block(h, asize);
 
+        /* split_block sets allocation and footer in both branches, but ensure allocated bit set */
         SET_ALLOC(h);
+        write_footer(h);
 
-        return bp;
+        return (char *)h + HDRSIZE;
     }
 
     // Need to map a new page
@@ -396,31 +390,21 @@ void *mm_malloc(size_t size) {
         page_list_head->prev_chunk = pc;
     page_list_head = pc;
 
-    // printf("[DEBUG] mm_malloc: page_insert: pc=%p prev=%p next=%p page_end=%p size=%zu\n",
-    //        pc, pc->prev_chunk, pc->next_chunk, (void*)pc->page_end, pc->size);
-
     // Place header right after page_chunk
     header_t *h = (header_t *)((char *)region + sizeof(page_chunk_t));
     h->size = total_size;
     h->allocated = 1;
-    write_footer(h);  // set page_end
+    write_footer(h);
 
     // If leftover space in the page, create a free block
     size_t remaining = mapsize - sizeof(page_chunk_t) - total_size;
 
     if (remaining >= HDRSIZE + MIN_BLOCK_SIZE + FDRSIZE) {
-        header_t *free_h = (header_t *)((char *)h + total_size); // <-- no 'header_t *' here
+        header_t *free_h = (header_t *)((char *)h + total_size);
         free_h->size = remaining;
         SET_FREE(free_h);
         write_footer(free_h);
         insert_free_block((char *)free_h + HDRSIZE);
-
-        // printf("[DEBUG] mm_malloc: | page chunk header %p | allocated block header %p size: %lu | free block %p size: %lu |\n\n",
-        //     pc, h, h->size, free_h, free_h->size);
-    }
-    else {
-        // printf("[DEBUG] mm_malloc: | page chunk header %p | allocated block header %p size: %lu |\n\n",
-        //     pc, h, h->size);
     }
 
     return (char *)h + HDRSIZE; // return payload pointer
@@ -428,8 +412,10 @@ void *mm_malloc(size_t size) {
 
 void mm_free(void *ptr) {
     if (!ptr) return;
-    printf("[DEBUG] mm_free called with %p\n", (char *)ptr - HDRSIZE);
     header_t *h = (header_t *)((char *)ptr - HDRSIZE);
+    printf("[DEBUG] mm_free called with payload %p header %p\n", ptr, (void*)h);
     SET_FREE(h);
+    /* Update footer so coalesce/get_next_block can safely use this block's footer */
+    write_footer(h);
     coalesce(ptr);
 }
